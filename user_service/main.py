@@ -3,10 +3,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from .database import Base, engine
-from . import models
-from .routers import users
-from .middleware import JWTMiddleware
+from database import Base, engine
+import models
+from routers import users
 
 
 logger = logging.getLogger(__name__)
@@ -31,7 +30,6 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-app.add_middleware(JWTMiddleware)
 
 # Register routes from routers/users.py
 app.include_router(users.router)

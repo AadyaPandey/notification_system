@@ -2,7 +2,7 @@ from pydantic import BaseModel, EmailStr, Field
 from uuid import UUID
 from datetime import datetime
 
-from .models import NotificationPreference
+from models import NotificationPreference
 
 
 class UserRegister(BaseModel):

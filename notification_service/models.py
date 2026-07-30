@@ -5,7 +5,7 @@ from sqlalchemy import Column, DateTime, Enum, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 
-from .database import Base
+from database import Base
 
 
 class NotificationChannel(enum.Enum):

@@ -3,16 +3,16 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from ..database import get_db
-from ..models import User
-from ..schemas import (
+from database import get_db
+from models import User
+from schemas import (
     UserRegister,
     UserResponse,
     UserLogin,
     TokenResponse
 )
 
-from ..auth import (
+from auth import (
     hash_password,
     verify_password,
     create_access_token
@@ -162,4 +162,26 @@ def get_profile(
         )
 
     return user
-    
+
+
+@router.get(
+    "/{user_id}",
+    response_model=UserResponse
+)
+def get_user(
+    user_id: UUID,
+    db: Session = Depends(get_db)
+):
+    user = (
+        db.query(User)
+        .filter(User.id == user_id)
+        .first()
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    return user

@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, Request, HTTPException
 from sqlalchemy.orm import Session
 
-from ..database import get_db
-from ..models import Notification
-from ..schemas import NotificationCreate, NotificationResponse
-from ..kafka_producer import publish_event
+from database import get_db
+from models import Notification
+from schemas import NotificationCreate, NotificationResponse
+from kafka_producer import publish_event
 
 router = APIRouter(
     prefix="/notifications",

@@ -2,9 +2,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from .database import Base, engine
-from . import models
-from .routers import notifications
+from database import Base, engine
+import models
+from routers import notifications
 
 
 @asynccontextmanager
