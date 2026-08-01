@@ -1,16 +1,11 @@
 from fastapi import HTTPException
 from redis_client import redis_client
 
-LOGIN_LIMIT = 5
-REGISTER_LIMIT = 3
-NOTIFICATION_LIMIT = 30
-
-LOGIN_WINDOW = 60
-REGISTER_WINDOW = 3600
-NOTIFICATION_WINDOW = 60
+LIMIT = 10
+WINDOW = 60
 
 
-def check_rate_limit(key: str, limit: int, window: int):
+def check_rate_limit(key: str, limit=LIMIT, window=WINDOW):
 
     count = redis_client.incr(key)
 

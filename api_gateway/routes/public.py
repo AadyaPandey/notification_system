@@ -5,11 +5,7 @@ from fastapi.responses import JSONResponse
 
 from config import USER_SERVICE
 from rate_limitter import (
-    check_rate_limit,
-    LOGIN_LIMIT,
-    LOGIN_WINDOW,
-    REGISTER_LIMIT,
-    REGISTER_WINDOW,
+    check_rate_limit
 )
 
 router = APIRouter(tags=["Public"])
@@ -21,9 +17,7 @@ async def register(payload: dict, request: Request):
     client_ip = request.client.host
 
     check_rate_limit(
-        key=f"register:{client_ip}",
-        limit=REGISTER_LIMIT,
-        window=REGISTER_WINDOW,
+        key=f"register:{client_ip}"
     )
 
     async with httpx.AsyncClient() as client:
@@ -46,8 +40,6 @@ async def login(payload: dict, request: Request):
 
     check_rate_limit(
         key=f"login:{client_ip}",
-        limit=LOGIN_LIMIT,
-        window=LOGIN_WINDOW,
     )
 
     async with httpx.AsyncClient() as client:

@@ -8,13 +8,13 @@ from sqlalchemy.sql import func
 from database import Base
 
 
-class NotificationChannel(enum.Enum):
+class NotificationChannel(str, enum.Enum):
     EMAIL = "EMAIL"
     SMS = "SMS"
     PUSH = "PUSH"
 
 
-class NotificationStatus(enum.Enum):
+class NotificationStatus(str, enum.Enum):
     PENDING = "PENDING"
     SENT = "SENT"
     FAILED = "FAILED"
@@ -34,7 +34,12 @@ class Notification(Base):
         nullable=False
     )
 
-    title = Column(
+    recipient = Column(
+        String(255),
+        nullable=False
+    )
+
+    subject = Column(
         String(255),
         nullable=False
     )

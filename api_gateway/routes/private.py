@@ -5,9 +5,7 @@ from fastapi.responses import JSONResponse
 
 from config import USER_SERVICE, NOTIFICATION_SERVICE
 from rate_limitter import (
-    check_rate_limit,
-    NOTIFICATION_LIMIT,
-    NOTIFICATION_WINDOW,
+    check_rate_limit
 )
 
 router = APIRouter(tags=["Private"])
@@ -39,9 +37,7 @@ async def create_notification(
     user_id = request.state.user_id
 
     check_rate_limit(
-        key=f"notification:{user_id}",
-        limit=NOTIFICATION_LIMIT,
-        window=NOTIFICATION_WINDOW,
+        key=f"notification:{user_id}"
     )
 
     payload["user_id"] = user_id
