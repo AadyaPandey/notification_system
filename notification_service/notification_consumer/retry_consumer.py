@@ -10,6 +10,14 @@ from models import Notification, NotificationStatus
 from kafka_producer import publish_event
 
 
+MAX_RETRY_COUNT = 3
+
+
+def get_backoff_seconds(retry_count: int) -> int:
+    """Return exponential backoff delay in seconds for retry attempts."""
+    return min(2 ** max(retry_count - 1, 0), 60)
+
+
 def send_email(notification):
 
     print(f"Retrying Email to {notification.recipient}")
@@ -76,6 +84,12 @@ def main() -> None:
                 print("Notification not found")
                 continue
 
+            if notification.status == NotificationStatus.SENT:
+                print(
+                    f"Notification {notification.id} already sent. Skipping duplicate retry"
+                )
+                continue
+
             try:
                 if channel == "EMAIL":
                     send_email(notification)
@@ -96,7 +110,13 @@ def main() -> None:
 
                 retry_count += 1
 
-                if retry_count < 3:
+                if retry_count < MAX_RETRY_COUNT:
+                    backoff_seconds = get_backoff_seconds(retry_count)
+                    print(
+                        f"Backing off for {backoff_seconds}s before retry {retry_count}"
+                    )
+                    time.sleep(backoff_seconds)
+
                     publish_event(
                         topic="notifications.retry",
                         user_id=user_id,

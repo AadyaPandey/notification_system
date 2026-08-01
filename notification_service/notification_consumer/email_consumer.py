@@ -8,24 +8,39 @@ from kafka import KafkaConsumer
 from database import SessionLocal
 from models import Notification, NotificationStatus
 from kafka_producer import publish_event
+import requests
+
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 
 
 def send_email(notification):
     """
-    Simulates sending an email.
+    Sends an email using Resend.
+    Raises an exception if the request fails.
     """
 
-    print(
-        f"\nSending Email to {notification.recipient}"
+    response = requests.post(
+        "https://api.resend.com/emails",
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+            "Idempotency-Key": str(notification.id),
+        },
+        json={
+            "from": "aadyapandey2004@gmail.com",   
+            "to": notification.recipient,
+            "subject": notification.subject,
+            "html": notification.message,
+        },
+        timeout=10,
     )
 
-    time.sleep(2)
+    if response.status_code not in (200, 201):
+        raise Exception(
+            f"Resend Error ({response.status_code}): {response.text}"
+        )
 
-    # Simulate random failure
-    if random.choice([True, False]):
-        raise Exception("Email service unavailable")
-
-    print("Email sent successfully!")
+    print(f"Email sent successfully to {notification.recipient}")
 
 
 def main() -> None:
@@ -58,6 +73,12 @@ def main() -> None:
                 print("Notification not found")
                 continue
 
+            if notification.status == NotificationStatus.SENT:
+                print(
+                    f"Notification {notification.id} already sent. Skipping duplicate delivery"
+                )
+                continue
+
             try:
                 send_email(notification)
 
@@ -74,30 +95,17 @@ def main() -> None:
 
                 retry_count += 1
 
-                if retry_count < 3:
-                    publish_event(
-                        topic="notifications.retry",
-                        user_id=user_id,
-                        notification_id=notification.id,
-                        channel=channel,
-                        retry_count=retry_count,
-                    )
+                publish_event(
+                    topic="notifications.retry",
+                    user_id=user_id,
+                    notification_id=notification.id,
+                    channel=channel,
+                    retry_count=retry_count,
+                )
 
-                    print("Published to Retry Topic")
-
-                else:
-                    notification.status = NotificationStatus.FAILED
-                    db.commit()
-
-                    publish_event(
-                        topic="notifications.dlq",
-                        user_id=user_id,
-                        notification_id=notification.id,
-                        channel=channel,
-                        retry_count=retry_count,
-                    )
-
-                    print("Published to DLQ")
+                print(
+                    f"Published retry event for notification {notification.id} with retry_count={retry_count}"
+                )
 
         finally:
             db.close()

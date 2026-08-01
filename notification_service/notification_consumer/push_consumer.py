@@ -74,30 +74,17 @@ def main() -> None:
 
                 retry_count += 1
 
-                if retry_count < 3:
-                    publish_event(
-                        topic="notifications.retry",
-                        user_id=user_id,
-                        notification_id=notification.id,
-                        channel=channel,
-                        retry_count=retry_count,
-                    )
+                publish_event(
+                    topic="notifications.retry",
+                    user_id=user_id,
+                    notification_id=notification.id,
+                    channel=channel,
+                    retry_count=retry_count,
+                )
 
-                    print("Published to Retry Topic")
-
-                else:
-                    notification.status = NotificationStatus.FAILED
-                    db.commit()
-
-                    publish_event(
-                        topic="notifications.dlq",
-                        user_id=user_id,
-                        notification_id=notification.id,
-                        channel=channel,
-                        retry_count=retry_count,
-                    )
-
-                    print("Published to DLQ")
+                print(
+                    f"Published retry event for notification {notification.id} with retry_count={retry_count}"
+                )
 
         finally:
             db.close()

@@ -48,7 +48,9 @@ async def create_notification(
             f"{NOTIFICATION_SERVICE}/notifications",
             json=payload,
         )
-
+    print(f"response-{response}")
+    print(f"user_id-{user_id}")
+    print(f"payload-{payload}")
     return JSONResponse(
         status_code=response.status_code,
         content=response.json(),
