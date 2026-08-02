@@ -22,8 +22,6 @@ def create_notification(
 ):
 
     user_id = notification.user_id
-    #use this user if to get the preference form notification_db
-    # Get user details from local notification DB
     user = (
         db.query(NotificationUser)
         .filter(NotificationUser.user_id == notification.user_id)
@@ -36,42 +34,54 @@ def create_notification(
             detail="User not found"
         )
 
-    channel_value = user.notification_preference.upper()
+    preference = user.notification_preference.lower()
 
-    if channel_value == "EMAIL":
-        topic = "notifications.email"
-
-    elif channel_value == "SMS":
-        topic = "notifications.sms"
-
-    elif channel_value == "PUSH":
-        topic = "notifications.push"
-
+    if preference == "both":
+        channel_names = ["EMAIL", "SMS"]
+    elif preference == "email":
+        channel_names = ["EMAIL"]
+    elif preference == "sms":
+        channel_names = ["SMS"]
     else:
         raise HTTPException(
             status_code=400,
             detail="Unsupported notification channel"
         )
 
-    new_notification = Notification(
-        user_id=user_id,
-        recipient=user.email,
-        subject=notification.subject,
-        message=notification.message,
-        channel=DBChannel(channel_value)
-)
+    created_notification = None
 
-    db.add(new_notification)
-    db.commit()
-    db.refresh(new_notification)
+    for channel_value in channel_names:
+        topic_map = {
+            "EMAIL": "notifications.email",
+            "SMS": "notifications.sms"
+        }
 
-    publish_event(
-        topic=topic,
-        user_id=user_id,
-        notification_id=new_notification.id,
-        channel=channel_value,
-        retry_count=0
-    )
+        recipient = user.email
+        if channel_value == "SMS":
+            recipient = user.phone_number
 
-    return new_notification
+        new_notification = Notification(
+            user_id=user_id,
+            recipient=recipient,
+            subject=notification.subject,
+            message=notification.message,
+            channel=DBChannel(channel_value)
+        )
+
+        db.add(new_notification)
+        db.commit()
+        db.refresh(new_notification)
+
+        publish_event(
+            topic=topic_map[channel_value],
+            user_id=user_id,
+            notification_id=new_notification.id,
+            channel=channel_value,
+            retry_count=0
+        )
+
+        if created_notification is None:
+            created_notification = new_notification
+
+    return created_notification
 

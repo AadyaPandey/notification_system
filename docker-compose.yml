@@ -11,11 +11,14 @@ services:
       - ./Frontend:/app
       - /app/node_modules
     depends_on:
-      - api-gateway
+      api-gateway:
+        condition: service_started
+    restart: unless-stopped
+
   postgres:
     image: postgres:16
     container_name: postgres
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -24,18 +27,29 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-notification_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
 
   redis:
     image: redis:7
     container_name: redis
-    restart: always
+    restart: unless-stopped
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   kafka:
     image: apache/kafka:latest
     container_name: kafka
-    restart: always
+    restart: unless-stopped
     ports:
       - "9092:9092"
     environment:
@@ -49,123 +63,157 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/9092'"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
 
   create-topics:
     build: ./notification_service
     container_name: create-topics
     command: python create_topics.py
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     env_file:
-      - .env  # Use root .env file
-      - .env  # Use root .env file
+      - .env
     restart: "no"
 
   user-service:
     build: ./user_service
     container_name: user-service
-    depends_on:
-      - postgres
     ports:
       - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     env_file:
-      - .env  # Use root .env file
-      - .env  # Use root .env file
+      - .env
+    restart: unless-stopped
 
   notification-service:
     build: ./notification_service
     container_name: notification-service
-    depends_on:
-      - postgres
-      - kafka
     ports:
       - "8002:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      create-topics:
+        condition: service_completed_successfully
     env_file:
-      - .env  # Use root .env file
-      - .env  # Use root .env file
+      - .env
+    restart: unless-stopped
 
   email-consumer:
     build: ./notification_service
     container_name: email-consumer
     command: python -m notification_consumer.email_consumer
     depends_on:
-      - postgres
-      - kafka
-      - create-topics
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      create-topics:
+        condition: service_completed_successfully
     env_file:
-      - .env  # Use root .env file
-      - .env  # Use root .env file
+      - .env
+    restart: unless-stopped
 
   sms-consumer:
     build: ./notification_service
     container_name: sms-consumer
     command: python -m notification_consumer.sms_consumer
     depends_on:
-      - postgres
-      - kafka
-      - create-topics
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      create-topics:
+        condition: service_completed_successfully
     env_file:
-      - .env  # Use root .env file
-      - .env  # Use root .env file
+      - .env
+    restart: unless-stopped
 
   push-consumer:
     build: ./notification_service
     container_name: push-consumer
     command: python -m notification_consumer.push_consumer
     depends_on:
-      - postgres
-      - kafka
-      - create-topics
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      create-topics:
+        condition: service_completed_successfully
     env_file:
-      - .env  # Use root .env file
-      - .env  # Use root .env file
+      - .env
+    restart: unless-stopped
 
   retry-consumer:
     build: ./notification_service
     container_name: retry-consumer
     command: python -m notification_consumer.retry_consumer
     depends_on:
-      - postgres
-      - kafka
-      - create-topics
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      create-topics:
+        condition: service_completed_successfully
     env_file:
-      - .env  # Use root .env file
-  
+      - .env
+    restart: unless-stopped
+
   user-consumer:
     build: ./notification_service
     container_name: user-consumer
     command: python -m notification_consumer.user_consumer
     depends_on:
-      - postgres
-      - kafka
-      - create-topics
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      create-topics:
+        condition: service_completed_successfully
     env_file:
       - .env
+    restart: unless-stopped
 
   dlq-consumer:
     build: ./notification_service
     container_name: dlq-consumer
     command: python -m notification_consumer.dlq_consumer
     depends_on:
-      - postgres
-      - kafka
-      - create-topics
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      create-topics:
+        condition: service_completed_successfully
     env_file:
-      - .env  # Use root .env file
-      - .env  # Use root .env file
+      - .env
+    restart: unless-stopped
 
   api-gateway:
     build: ./api_gateway
     container_name: api-gateway
-    depends_on:
-      - user-service
-      - notification-service
-      - redis
     ports:
       - "8000:8000"
+    depends_on:
+      user-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
+      redis:
+        condition: service_healthy
     env_file:
-      - .env  # Use root .env file
-      - .env  # Use root .env file
+      - .env
+    restart: unless-stopped
 
 volumes:
   postgres_data:

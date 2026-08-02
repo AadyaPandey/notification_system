@@ -10,15 +10,19 @@ export default function RegisterForm() {
 
   const [form, setForm] = useState({
     email: "",
+    phone_number: "",
     password: "",
     confirmPassword: "",
-    notification_preference: "email",
+    email_notifications: true,
+    sms_notifications: false,
   });
 
   const handleChange = (e) => {
+    const { name, type, checked, value } = e.target;
+
     setForm((prev) => ({
       ...prev,
-      [e.target.name]: e.target.value,
+      [name]: type === "checkbox" ? checked : value,
     }));
   };
 
@@ -33,10 +37,24 @@ export default function RegisterForm() {
     setLoading(true);
 
     try {
+      const selectedChannels = [];
+
+      if (form.email_notifications) {
+        selectedChannels.push("email");
+      }
+
+      if (form.sms_notifications) {
+        selectedChannels.push("sms");
+      }
+
       const payload = {
         email: form.email,
+        phone_number: form.phone_number,
         password: form.password,
-        notification_preference: form.notification_preference,
+        notification_preference:
+          selectedChannels.length > 1
+            ? "both"
+            : selectedChannels[0] || "email",
       };
 
       const response = await axios.post(
@@ -107,20 +125,46 @@ export default function RegisterForm() {
         </div>
 
         <div>
+          <label className="block mb-2 font-medium">Phone Number</label>
+
+          <input
+            type="tel"
+            name="phone_number"
+            value={form.phone_number}
+            onChange={handleChange}
+            className="w-full border rounded-lg p-3"
+            placeholder="0000000000"
+            required
+          />
+        </div>
+
+
+        <div>
           <label className="block mb-2 font-medium">
             Notification Preference
           </label>
 
-          <select
-            name="notification_preference"
-            value={form.notification_preference}
-            onChange={handleChange}
-            className="w-full border rounded-lg p-3"
-          >
-            <option value="email">Email</option>
-            <option value="sms">SMS</option>
-            <option value="both">Both</option>
-          </select>
+          <div className="space-y-2 border rounded-lg p-3">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                name="email_notifications"
+                checked={form.email_notifications}
+                onChange={handleChange}
+              />
+              Email
+            </label>
+
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                name="sms_notifications"
+                checked={form.sms_notifications}
+                onChange={handleChange}
+              />
+              SMS
+            </label>
+          </div>
         </div>
 
         <button
