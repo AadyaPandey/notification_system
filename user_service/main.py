@@ -6,6 +6,8 @@ from fastapi import FastAPI
 from database import Base, engine
 import models
 from routers import users
+from fastapi.middleware.cors import CORSMiddleware
+
 
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,16 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="User Service",
     lifespan=lifespan
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",  # Vite
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
