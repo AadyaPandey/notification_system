@@ -1,50 +1,75 @@
 import json
+import logging
 import os
-import random
-import time
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 from kafka import KafkaConsumer
 
 from database import SessionLocal
-from models import Notification, NotificationStatus
 from kafka_producer import publish_event
-import requests
+from models import Notification, NotificationStatus
 
-RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+
+logger = logging.getLogger(__name__)
+
+EMAIL = os.getenv("EMAIL_ADDRESS")
+APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
 
 
 def send_email(notification):
-    print("[1] Entered send_email()")
+    if not EMAIL:
+        raise ValueError("EMAIL_ADDRESS not set")
 
-    response = requests.post(
-        "https://api.resend.com/emails",
-        headers={
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-            "Content-Type": "application/json",
-            "Idempotency-Key": str(notification.id),
-        },
-        json={
-            "from": "aadyapandey2004@gmail.com",
-            "to": notification.recipient,
-            "subject": notification.subject,
-            "html": notification.message,
-        },
-        timeout=10,
+    if not APP_PASSWORD:
+        raise ValueError("EMAIL_APP_PASSWORD not set")
+
+    logger.info(
+        "Sending email to %s",
+        notification.recipient,
     )
 
-    print(f"[2] Resend responded with status {response.status_code}")
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = notification.subject
+    msg["From"] = EMAIL
+    msg["To"] = notification.recipient
 
-    if response.status_code not in (200, 201):
-        print("[3] Email request failed")
-        raise Exception(
-            f"Resend Error ({response.status_code}): {response.text}"
+    html = f"""
+    <html>
+        <body>
+            {notification.message}
+        </body>
+    </html>
+    """
+
+    msg.attach(MIMEText(html, "html"))
+
+    with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
+        smtp.ehlo()
+        smtp.starttls()
+        smtp.ehlo()
+
+        smtp.login(EMAIL, APP_PASSWORD)
+
+        smtp.sendmail(
+            EMAIL,
+            notification.recipient,
+            msg.as_string(),
         )
 
-    print(f"[4] Email sent successfully to {notification.recipient}")
+    logger.info(
+        "Email sent successfully to %s",
+        notification.recipient,
+    )
 
 
 def main() -> None:
-    print("[A] Starting email consumer")
+    logger.info("Starting Email Consumer...")
 
     consumer = KafkaConsumer(
         "notifications.email",
@@ -54,13 +79,17 @@ def main() -> None:
         value_deserializer=lambda m: json.loads(m.decode("utf-8")),
     )
 
-    print("[B] Kafka consumer created. Waiting for messages...")
+    logger.info("Waiting for Kafka messages...")
 
     for message in consumer:
-        print("[C] Received a Kafka message")
+        logger.info(
+            "Received Kafka message | partition=%s offset=%s",
+            message.partition,
+            message.offset,
+        )
 
         event = message.value
-        print(f"[D] Event: {event}")
+        logger.info("Event: %s", event)
 
         notification_id = event["notification_id"]
         retry_count = event["retry_count"]
@@ -68,7 +97,6 @@ def main() -> None:
         channel = event.get("channel", "EMAIL")
 
         db = SessionLocal()
-        print("[E] Database session created")
 
         try:
             notification = (
@@ -77,40 +105,38 @@ def main() -> None:
                 .first()
             )
 
-            print("[F] Database query executed")
-
             if notification is None:
-                print("[G] Notification not found")
-                continue
-
-            print(f"[H] Notification found. Status={notification.status}")
-
-            if notification.status == NotificationStatus.SENT:
-                print(
-                    f"[I] Notification {notification.id} already sent. Skipping."
+                logger.warning(
+                    "Notification %s not found",
+                    notification_id,
                 )
                 continue
 
-            print("[J] Calling send_email()")
+            if notification.status == NotificationStatus.SENT:
+                logger.info(
+                    "Notification %s already sent. Skipping duplicate delivery.",
+                    notification.id,
+                )
+                continue
 
             try:
                 send_email(notification)
 
-                print("[K] Returned from send_email()")
-
                 notification.status = NotificationStatus.SENT
-                print("[L] Status updated to SENT")
-
                 db.commit()
-                print("[M] Database committed")
 
-                print(f"[N] Notification {notification.id} marked SENT")
+                logger.info(
+                    "Notification %s marked as SENT",
+                    notification.id,
+                )
 
-            except Exception as e:
-                print(f"[O] Exception while sending email: {e}")
+            except Exception:
+                logger.exception(
+                    "Failed to send email for notification %s",
+                    notification.id,
+                )
 
                 retry_count += 1
-                print(f"[P] Retry count = {retry_count}")
 
                 publish_event(
                     topic="notifications.retry",
@@ -120,15 +146,16 @@ def main() -> None:
                     retry_count=retry_count,
                 )
 
-                print(
-                    f"[Q] Published retry event for notification {notification.id}"
+                logger.info(
+                    "Published retry event for notification %s (retry_count=%d)",
+                    notification.id,
+                    retry_count,
                 )
 
         finally:
-            print("[R] Closing DB session")
             db.close()
+            logger.info("Database session closed")
 
 
 if __name__ == "__main__":
     main()
-
