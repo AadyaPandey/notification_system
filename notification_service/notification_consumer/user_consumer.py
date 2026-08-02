@@ -46,6 +46,7 @@ def handle_user_registered(db, event):
     user = NotificationUser(
         user_id=event["user_id"],
         email=event["email"],
+        phone_number=event["phone_number"],
         notification_preference=event["notification_preference"],
     )
 
@@ -75,6 +76,7 @@ def handle_user_updated(db, event):
         return
 
     user.email = event["email"]
+    user.phone_number = event["phone_number"]
     user.notification_preference = event[
         "notification_preference"
     ]

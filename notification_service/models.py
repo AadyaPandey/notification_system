@@ -84,6 +84,11 @@ class NotificationUser(Base):
         nullable=False
     )
 
+    phone_number = Column(
+        String(10),
+        nullable=False
+    )
+
     notification_preference = Column(
         String(50),
         nullable=False

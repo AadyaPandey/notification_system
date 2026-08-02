@@ -68,6 +68,7 @@ def register_user(
     # 3. Create User object
     new_user = User(
         email=user_data.email,
+        phone_number=user_data.phone_number,
         hashed_password=hashed_password,
         notification_preference=user_data.notification_preference
     )
@@ -82,6 +83,7 @@ def register_user(
         "event": "USER_REGISTERED",
         "user_id": str(new_user.id),
         "email": new_user.email,
+        "phone_number": new_user.phone_number,
         "notification_preference": new_user.notification_preference.value,
     }
 )

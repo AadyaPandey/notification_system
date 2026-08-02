@@ -12,6 +12,7 @@ class NotificationPreference(enum.Enum):
     EMAIL = "email"
     SMS = "sms"
     PUSH = "push"
+    BOTH = "both"
 
 
 class User(Base):
@@ -25,6 +26,13 @@ class User(Base):
 
     email = Column(
         String,
+        unique=True,
+        nullable=False,
+        index=True
+    )
+
+    phone_number = Column(
+        String(10),
         unique=True,
         nullable=False,
         index=True
