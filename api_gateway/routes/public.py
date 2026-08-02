@@ -27,9 +27,16 @@ async def register(payload: dict, request: Request):
             json=payload,
         )
 
+    try:
+        body = response.json()
+    except ValueError:
+        body = {
+            "detail": response.text or "Upstream user service returned an invalid response"
+        }
+
     return JSONResponse(
         status_code=response.status_code,
-        content=response.json(),
+        content=body,
     )
 
 
@@ -49,7 +56,14 @@ async def login(payload: dict, request: Request):
             json=payload,
         )
 
+    try:
+        body = response.json()
+    except ValueError:
+        body = {
+            "detail": response.text or "Upstream user service returned an invalid response"
+        }
+
     return JSONResponse(
         status_code=response.status_code,
-        content=response.json(),
+        content=body,
     )

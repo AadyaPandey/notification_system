@@ -1,6 +1,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from kafka_producer import publish_user_event
@@ -44,22 +45,25 @@ def register_user(
         "Registration request received for email=%s",
         user_data.email
     )
-
-    # 1. Check if user already exists
-    existing_user = (
+    # 1. Find user by email or phone number
+    user = (
         db.query(User)
-        .filter(User.email == user_data.email)
-        .first()
-    )
-
-    if existing_user:
-        logger.warning(
-            "Registration failed: email already registered"
+        .filter(
+            or_(
+                User.email == user_data.email,
+                User.phone_number == user_data.phone_number,
+                )
+            )
+            .first()
         )
-
+    
+        # 2. Check if user exists
+    if user:
+        logger.warning("Register failed: User exists already")
+    
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User exists already"
         )
 
     # 2. Hash the password
