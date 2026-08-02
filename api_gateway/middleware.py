@@ -11,6 +11,10 @@ class JWTMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
 
+        # Allow CORS preflight requests
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         public_routes = [
             "/users/register",
             "/users/login",
@@ -41,7 +45,6 @@ class JWTMiddleware(BaseHTTPMiddleware):
             )
 
         try:
-
             scheme, token = authorization.split(" ", 1)
 
             if scheme.lower() != "bearer":

@@ -40,12 +40,68 @@ def send_email(notification):
     msg["To"] = notification.recipient
 
     html = f"""
-    <html>
-        <body>
-            {notification.message}
-        </body>
-    </html>
-    """
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>GrantGuard Notification</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f7fb;font-family:Arial,Helvetica,sans-serif;">
+
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 0;">
+    <tr>
+      <td align="center">
+
+        <table width="600" cellpadding="0" cellspacing="0"
+               style="background:#ffffff;border-radius:12px;overflow:hidden;
+                      box-shadow:0 4px 12px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td align="center"
+                style="background:#2563eb;padding:24px;color:white;">
+              <h1 style="margin:0;font-size:28px;">
+                GrantGuard
+              </h1>
+              <p style="margin-top:8px;font-size:15px;">
+                Grant Application Review
+              </p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:35px;color:#333;line-height:1.7;font-size:16px;">
+              {notification.message.replace(chr(10), "<br>")}
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td>
+              <hr style="border:none;border-top:1px solid #e5e7eb;">
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td align="center"
+                style="padding:20px;color:#6b7280;font-size:13px;">
+              This email was generated automatically by
+              <strong>GrantGuard</strong>.<br>
+              Please do not reply to this email.
+            </td>
+          </tr>
+
+        </table>
+
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>
+"""
 
     msg.attach(MIMEText(html, "html"))
 
