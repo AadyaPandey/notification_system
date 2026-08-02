@@ -9,6 +9,7 @@ class UserRegister(BaseModel):
     email: EmailStr
     phone_number: str = Field(length=10)
     password: str = Field(min_length=8)
+    
     notification_preference: NotificationPreference = NotificationPreference.EMAIL
 
 
