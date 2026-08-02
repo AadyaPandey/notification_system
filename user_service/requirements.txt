@@ -7,3 +7,4 @@ bcrypt
 PyJWT
 pydantic
 email-validator
+kafka-python

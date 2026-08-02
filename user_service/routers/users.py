@@ -3,6 +3,8 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from kafka_producer import publish_user_event
+
 from database import get_db
 from models import User
 from schemas import (
@@ -74,6 +76,15 @@ def register_user(
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+
+    publish_user_event(
+    {
+        "event": "USER_REGISTERED",
+        "user_id": str(new_user.id),
+        "email": new_user.email,
+        "notification_preference": new_user.notification_preference.value,
+    }
+)
 
     logger.info(
         "User registered successfully: user_id=%s",
