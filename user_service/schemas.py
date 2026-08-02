@@ -7,7 +7,9 @@ from models import NotificationPreference
 
 class UserRegister(BaseModel):
     email: EmailStr
+    phone_number:str =Field(min_length=8)
     password: str = Field(min_length=8)
+    
     notification_preference: NotificationPreference = NotificationPreference.EMAIL
 
 
@@ -19,6 +21,7 @@ class UserLogin(BaseModel):
 class UserResponse(BaseModel):
     id: UUID
     email: EmailStr
+    phone_number:str
     notification_preference: NotificationPreference
     created_at: datetime
     updated_at: datetime
