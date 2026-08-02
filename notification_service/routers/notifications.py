@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import Notification, NotificationChannel as DBChannel
+from models import Notification, NotificationChannel as DBChannel, NotificationUser
 from schemas import NotificationCreate, NotificationResponse
 from kafka_producer import publish_event
 
@@ -22,8 +22,21 @@ def create_notification(
 ):
 
     user_id = notification.user_id
+    #use this user if to get the preference form notification_db
+    # Get user details from local notification DB
+    user = (
+        db.query(NotificationUser)
+        .filter(NotificationUser.user_id == notification.user_id)
+        .first()
+    )
 
-    channel_value = notification.channel.value
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
+
+    channel_value = user.notification_preference.upper()
 
     if channel_value == "EMAIL":
         topic = "notifications.email"
@@ -42,11 +55,11 @@ def create_notification(
 
     new_notification = Notification(
         user_id=user_id,
-        recipient=notification.recipient,
+        recipient=user.email,
         subject=notification.subject,
         message=notification.message,
         channel=DBChannel(channel_value)
-    )
+)
 
     db.add(new_notification)
     db.commit()
