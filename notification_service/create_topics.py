@@ -27,6 +27,8 @@ TOPICS = {
     "notifications.push": 4,
     "notifications.retry": 2,
     "notifications.dlq": 1,
+
+    "user-events": 2,
 }
 
 

@@ -45,6 +45,7 @@ services:
       - kafka
     env_file:
       - .env  # Use root .env file
+      - .env  # Use root .env file
     restart: "no"
 
   user-service:
@@ -55,6 +56,7 @@ services:
     ports:
       - "8001:8000"
     env_file:
+      - .env  # Use root .env file
       - .env  # Use root .env file
 
   notification-service:
@@ -67,6 +69,7 @@ services:
       - "8002:8000"
     env_file:
       - .env  # Use root .env file
+      - .env  # Use root .env file
 
   email-consumer:
     build: ./notification_service
@@ -77,6 +80,7 @@ services:
       - kafka
       - create-topics
     env_file:
+      - .env  # Use root .env file
       - .env  # Use root .env file
 
   sms-consumer:
@@ -89,6 +93,7 @@ services:
       - create-topics
     env_file:
       - .env  # Use root .env file
+      - .env  # Use root .env file
 
   push-consumer:
     build: ./notification_service
@@ -99,6 +104,7 @@ services:
       - kafka
       - create-topics
     env_file:
+      - .env  # Use root .env file
       - .env  # Use root .env file
 
   retry-consumer:
@@ -111,6 +117,17 @@ services:
       - create-topics
     env_file:
       - .env  # Use root .env file
+  
+  user-consumer:
+    build: ./notification_service
+    container_name: user-consumer
+    command: python -m notification_consumer.user_consumer
+    depends_on:
+      - postgres
+      - kafka
+      - create-topics
+    env_file:
+      - .env
 
   dlq-consumer:
     build: ./notification_service
@@ -121,6 +138,7 @@ services:
       - kafka
       - create-topics
     env_file:
+      - .env  # Use root .env file
       - .env  # Use root .env file
 
   api-gateway:
@@ -133,6 +151,7 @@ services:
     ports:
       - "8000:8000"
     env_file:
+      - .env  # Use root .env file
       - .env  # Use root .env file
 
 volumes:
