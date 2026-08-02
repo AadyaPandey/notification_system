@@ -19,10 +19,8 @@ class NotificationStatus(str, Enum):
 
 class NotificationCreate(BaseModel):
     user_id: UUID
-    recipient: str
     subject: str
     message: str
-    channel: NotificationChannel
 
 
 class NotificationResponse(BaseModel):
