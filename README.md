@@ -101,12 +101,6 @@ Common environment variables you will likely need to set (refer to api_gateway/c
 
 Always check api_gateway/config.py and notification_service/notification_consumer/email_consumer.py for the exact variable names before running.
 
-## Testing
-- A small test harness exists: test_email.py — can be used to validate email sending configured in notification_service.
-  python test_email.py
-
-- To test consumers, run notification_service with a running Kafka broker and publish test messages (create_topics.py helps prepare topics).
-
 ## Important files to inspect
 - api_gateway/main.py — gateway entrypoint and server setup
 - api_gateway/middleware.py — auth & request middleware logic
@@ -115,21 +109,3 @@ Always check api_gateway/config.py and notification_service/notification_consume
 - notification_service/retry_consumer.py, dlq_consumer.py — retry and dead-letter handling
 - Frontend/src/components/* — UI components (LoginForm, RegisterForm, GrantApplicationForm)
 
-## Contributing
-- Open an issue describing the change.
-- Create a feature branch, add tests where applicable.
-- Submit a pull request with a clear description and testing steps.
-
-## License
-Specify a license here (NONE included in repo). Add a LICENSE file if you want to make the project open source.
-
-## Contact / Questions
-If you need help setting up local dependencies (Kafka, Redis, DB) or configuring SMTP creds, refer to:
-- docker-compose.yml (service definitions & ports)
-- api_gateway/config.py
-- notification_service/* for consumer logic
-
-## Try asking
-- How should I configure SMTP credentials so email_consumer.py picks them up (where in notification_service are they referenced)?
-- Can you add unit tests for notification_service/notification_consumer/retry_consumer.py and a small CI job to run them?
-- Where does api_gateway route requests to the user_service (which route file and path) and how is authentication checked before forwarding?
