@@ -9,9 +9,9 @@ from database import SessionLocal
 from models import Notification, NotificationStatus
 
 
-# --------------------------------------------------
-# Logging configuration
-# --------------------------------------------------
+# ============================================================
+# Logging
+# ============================================================
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,9 +21,9 @@ logging.basicConfig(
 logger = logging.getLogger("dlq-consumer")
 
 
-# --------------------------------------------------
+# ============================================================
 # Prometheus metrics
-# --------------------------------------------------
+# ============================================================
 
 dlq_processed = Counter(
     "notification_dlq_processed_total",
@@ -38,28 +38,46 @@ dlq_failed = Counter(
 )
 
 
-# --------------------------------------------------
+# ============================================================
 # Main consumer
-# --------------------------------------------------
+# ============================================================
 
 def main() -> None:
 
-    logger.info("Starting DLQ consumer...")
+    logger.info(
+        "Starting DLQ consumer..."
+    )
 
-    # Start Prometheus metrics server
+    # --------------------------------------------------------
+    # Prometheus
+    # --------------------------------------------------------
+
     start_http_server(9100)
 
     logger.info(
         "Prometheus metrics server started on port 9100"
     )
 
+    # --------------------------------------------------------
+    # Kafka consumer
+    # --------------------------------------------------------
+
     consumer = KafkaConsumer(
         "notifications.dlq",
+
         bootstrap_servers=os.getenv(
-            "KAFKA_BOOTSTRAP_SERVERS"
+            "KAFKA_BOOTSTRAP_SERVERS",
+            "kafka:9092",
         ),
+
         group_id="dlq-group",
+
         auto_offset_reset="latest",
+
+        # IMPORTANT:
+        # Commit only after DB processing succeeds.
+        enable_auto_commit=False,
+
         value_deserializer=lambda m: json.loads(
             m.decode("utf-8")
         ),
@@ -69,30 +87,58 @@ def main() -> None:
         "Connected to Kafka topic=notifications.dlq"
     )
 
+    # --------------------------------------------------------
+    # Consume DLQ events
+    # --------------------------------------------------------
+
     for message in consumer:
 
         event = message.value
 
-        logger.info(
-            "Received DLQ event | event=%s",
-            event,
+        notification_id = event["notification_id"]
+
+        retry_count = event.get(
+            "retry_count",
+            0,
         )
 
-        notification_id = event["notification_id"]
-        retry_count = event["retry_count"]
-        channel = event["channel"]
+        channel = event.get(
+            "channel",
+            "UNKNOWN",
+        )
+
+        logger.warning(
+            "Received DLQ event | "
+            "partition=%s | "
+            "offset=%s | "
+            "notification_id=%s | "
+            "retry_count=%s",
+            message.partition,
+            message.offset,
+            notification_id,
+            retry_count,
+        )
 
         db = SessionLocal()
 
         try:
+
+            # ------------------------------------------------
+            # Find notification
+            # ------------------------------------------------
 
             notification = (
                 db.query(Notification)
                 .filter(
                     Notification.id == notification_id
                 )
+                .with_for_update()
                 .first()
             )
+
+            # ------------------------------------------------
+            # Notification doesn't exist
+            # ------------------------------------------------
 
             if notification is None:
 
@@ -102,54 +148,85 @@ def main() -> None:
                     notification_id,
                 )
 
-                # This is a processing failure because
-                # the DLQ event could not be handled.
                 dlq_failed.labels(
                     channel=channel
                 ).inc()
 
+                # The message cannot be processed.
+                # Commit so it does not loop forever.
+                consumer.commit()
+
                 continue
 
-            # --------------------------------------------------
-            # Mark notification as FAILED
-            # --------------------------------------------------
+            # ------------------------------------------------
+            # Already FAILED
+            # ------------------------------------------------
 
-            notification.status = NotificationStatus.FAILED
+            if notification.status == NotificationStatus.FAILED:
+
+                logger.info(
+                    "Notification already FAILED | "
+                    "notification_id=%s",
+                    notification.id,
+                )
+
+                db.rollback()
+
+                consumer.commit()
+
+                continue
+
+            # ------------------------------------------------
+            # Mark permanently failed
+            # ------------------------------------------------
+
+            notification.status = (
+                NotificationStatus.FAILED
+            )
+
+            notification.next_retry_at = None
+
+            # Keep last_error as it is.
+            # It contains the actual provider failure.
 
             db.commit()
 
-            # Count successfully processed DLQ event
             dlq_processed.labels(
                 channel=channel
             ).inc()
 
-            logger.warning(
-                "Notification moved to FAILED via DLQ | "
+            logger.error(
+                "Notification permanently FAILED via DLQ | "
                 "notification_id=%s | "
                 "channel=%s | "
                 "recipient=%s | "
-                "retry_attempts=%s",
+                "retry_count=%s",
                 notification.id,
                 channel,
                 notification.recipient,
                 retry_count,
             )
 
+            # Kafka offset only after DB commit.
+            consumer.commit()
+
         except Exception:
 
-            # Count failed DLQ processing
+            db.rollback()
+
             dlq_failed.labels(
                 channel=channel
             ).inc()
 
-            # Log full traceback if database processing fails
             logger.exception(
                 "Failed to process DLQ event | "
                 "notification_id=%s",
                 notification_id,
             )
 
-            db.rollback()
+            # DO NOT commit Kafka offset.
+            #
+            # Kafka will redeliver the DLQ event.
 
         finally:
 
@@ -161,6 +238,10 @@ def main() -> None:
                 notification_id,
             )
 
+
+# ============================================================
+# Entry point
+# ============================================================
 
 if __name__ == "__main__":
     main()

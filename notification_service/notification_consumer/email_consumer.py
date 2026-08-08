@@ -3,6 +3,7 @@ import logging
 import os
 import smtplib
 from datetime import datetime, timedelta, timezone
+
 from prometheus_client import Counter, start_http_server
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -10,8 +11,13 @@ from email.mime.text import MIMEText
 from kafka import KafkaConsumer
 
 from database import SessionLocal
+from kafka_producer import publish_event
 from models import Notification, NotificationStatus
 
+
+# --------------------------------------------------
+# Logging configuration
+# --------------------------------------------------
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,11 +26,26 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+
+# --------------------------------------------------
+# Email configuration
+# --------------------------------------------------
+
 EMAIL = os.getenv("EMAIL_ADDRESS")
 APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
 
+
+# --------------------------------------------------
+# Retry configuration
+# --------------------------------------------------
+
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 5
+
+
+# --------------------------------------------------
+# Prometheus metrics
+# --------------------------------------------------
 
 emails_processed = Counter(
     "email_notifications_processed_total",
@@ -36,8 +57,18 @@ emails_failed = Counter(
     "Total number of email notifications that failed",
 )
 
+emails_dlq = Counter(
+    "email_notifications_dlq_total",
+    "Total number of email notifications moved to DLQ",
+)
+
+
+# --------------------------------------------------
+# Send email
+# --------------------------------------------------
 
 def send_email(notification):
+
     if not EMAIL:
         raise ValueError("EMAIL_ADDRESS not set")
 
@@ -50,24 +81,12 @@ def send_email(notification):
     )
 
     msg = MIMEMultipart("alternative")
+
     msg["Subject"] = notification.subject
     msg["From"] = EMAIL
     msg["To"] = notification.recipient
 
     html = f"""
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>FundWise Notification</title>
-</head>
-
-<body style="margin:0;padding:0;background-color:#f4f7fb;
-             font-family:Arial,Helvetica,sans-serif;">
-
-  <table width="100%" cellpadding="0" cellspacing="0"
-         style="padding:40px 0;">
-
     <tr>
       <td align="center">
 
@@ -125,21 +144,25 @@ def send_email(notification):
 
       </td>
     </tr>
+    """
 
-  </table>
+    msg.attach(
+        MIMEText(html, "html")
+    )
 
-</body>
-</html>
-"""
+    with smtplib.SMTP(
+        "smtp.gmail.com",
+        587,
+    ) as smtp:
 
-    msg.attach(MIMEText(html, "html"))
-
-    with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
         smtp.ehlo()
         smtp.starttls()
         smtp.ehlo()
 
-        smtp.login(EMAIL, APP_PASSWORD)
+        smtp.login(
+            EMAIL,
+            APP_PASSWORD,
+        )
 
         smtp.sendmail(
             EMAIL,
@@ -153,6 +176,10 @@ def send_email(notification):
     )
 
 
+# --------------------------------------------------
+# Retry scheduling
+# --------------------------------------------------
+
 def schedule_retry(db, notification, error):
     """
     Schedule the next retry using exponential backoff.
@@ -160,10 +187,15 @@ def schedule_retry(db, notification, error):
     Retry 1 -> 5 seconds
     Retry 2 -> 10 seconds
     Retry 3 -> 20 seconds
+    After that -> FAILED + DLQ
     """
 
     notification.retry_count += 1
     notification.last_error = str(error)
+
+    # --------------------------------------------------
+    # Schedule another retry
+    # --------------------------------------------------
 
     if notification.retry_count <= MAX_RETRIES:
 
@@ -171,7 +203,9 @@ def schedule_retry(db, notification, error):
             2 ** (notification.retry_count - 1)
         )
 
-        notification.status = NotificationStatus.RETRY_PENDING
+        notification.status = (
+            NotificationStatus.RETRY_PENDING
+        )
 
         notification.next_retry_at = (
             datetime.now(timezone.utc)
@@ -181,33 +215,98 @@ def schedule_retry(db, notification, error):
         db.commit()
 
         logger.info(
-            "Notification %s scheduled for retry %d in %d seconds",
+            "Notification %s scheduled for retry "
+            "%d/%d in %d seconds",
             notification.id,
             notification.retry_count,
+            MAX_RETRIES,
             delay_seconds,
         )
 
+    # --------------------------------------------------
+    # Maximum retries reached
+    # --------------------------------------------------
+
     else:
-        notification.status = NotificationStatus.FAILED
+
+        notification.status = (
+            NotificationStatus.FAILED
+        )
+
         notification.next_retry_at = None
 
+        # Save FAILED state in PostgreSQL
         db.commit()
 
         logger.error(
-            "Notification %s permanently failed after %d retries",
+            "Notification %s permanently failed "
+            "after %d retries",
             notification.id,
             MAX_RETRIES,
         )
 
+        # --------------------------------------------------
+        # Publish failed notification to DLQ
+        # --------------------------------------------------
+
+        try:
+
+            publish_event(
+                topic="notifications.dlq",
+                user_id=notification.user_id,
+                notification_id=notification.id,
+                channel="EMAIL",
+                retry_count=notification.retry_count,
+            )
+
+            emails_dlq.inc()
+
+            logger.warning(
+                "Notification %s moved to DLQ | "
+                "channel=EMAIL | retry_count=%d",
+                notification.id,
+                notification.retry_count,
+            )
+
+        except Exception:
+
+            logger.exception(
+                "Failed to publish notification %s "
+                "to DLQ",
+                notification.id,
+            )
+
+
+# --------------------------------------------------
+# Main consumer
+# --------------------------------------------------
 
 def main() -> None:
-    logger.info("Starting Email Consumer...")
+
+    logger.info(
+        "Starting Email Consumer..."
+    )
+
+    # --------------------------------------------------
+    # Prometheus
+    # --------------------------------------------------
+
     start_http_server(9100)
-    logger.info("Prometheus metrics server started on port 9100")
+
+    logger.info(
+        "Prometheus metrics server started "
+        "on port 9100"
+    )
+
+    # --------------------------------------------------
+    # Kafka consumer
+    # --------------------------------------------------
 
     consumer = KafkaConsumer(
         "notifications.email",
-        bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS"),
+        bootstrap_servers=os.getenv(
+            "KAFKA_BOOTSTRAP_SERVERS"
+        ),
         group_id="email-group",
         auto_offset_reset="latest",
         value_deserializer=lambda m: json.loads(
@@ -215,12 +314,19 @@ def main() -> None:
         ),
     )
 
-    logger.info("Waiting for Kafka messages...")
+    logger.info(
+        "Waiting for Kafka messages..."
+    )
+
+    # --------------------------------------------------
+    # Consume messages
+    # --------------------------------------------------
 
     for message in consumer:
 
         logger.info(
-            "Received Kafka message | partition=%s offset=%s",
+            "Received Kafka message | "
+            "partition=%s offset=%s",
             message.partition,
             message.offset,
         )
@@ -232,52 +338,94 @@ def main() -> None:
             event,
         )
 
-        notification_id = event["notification_id"]
+        notification_id = event[
+            "notification_id"
+        ]
 
         db = SessionLocal()
 
         try:
+
             notification = (
                 db.query(Notification)
                 .filter(
-                    Notification.id == notification_id
+                    Notification.id
+                    == notification_id
                 )
                 .first()
             )
 
+            # --------------------------------------------------
+            # Notification doesn't exist
+            # --------------------------------------------------
+
             if notification is None:
+
                 logger.warning(
                     "Notification %s not found",
                     notification_id,
                 )
+
                 continue
 
-            # Prevent duplicate email delivery
-            if notification.status == NotificationStatus.SENT:
+            logger.info(
+                "Processing notification %s | "
+                "retry_count=%d",
+                notification.id,
+                notification.retry_count,
+            )
+
+            # --------------------------------------------------
+            # Already sent
+            # --------------------------------------------------
+
+            if (
+                notification.status
+                == NotificationStatus.SENT
+            ):
+
                 logger.info(
                     "Notification %s already sent. "
                     "Skipping duplicate delivery.",
                     notification.id,
                 )
+
                 continue
 
-            # If the notification has already permanently failed,
-            # don't process it again.
-            if notification.status == NotificationStatus.FAILED:
+            # --------------------------------------------------
+            # Already permanently failed
+            # --------------------------------------------------
+
+            if (
+                notification.status
+                == NotificationStatus.FAILED
+            ):
+
                 logger.info(
-                    "Notification %s already marked FAILED. "
+                    "Notification %s already FAILED. "
                     "Skipping.",
                     notification.id,
                 )
+
                 continue
 
+            # --------------------------------------------------
+            # Attempt email delivery
+            # --------------------------------------------------
+
             try:
+
                 send_email(notification)
 
-                notification.status = NotificationStatus.SENT
+                # --------------------------------------------------
+                # SUCCESS
+                # --------------------------------------------------
+
+                notification.status = (
+                    NotificationStatus.SENT
+                )
 
                 notification.next_retry_at = None
-
                 notification.last_error = None
 
                 db.commit()
@@ -290,9 +438,16 @@ def main() -> None:
                 )
 
             except Exception as exc:
+
+                # --------------------------------------------------
+                # FAILURE
+                # --------------------------------------------------
+
                 emails_failed.inc()
+
                 logger.exception(
-                    "Failed to send email for notification %s",
+                    "Failed to send email for "
+                    "notification %s",
                     notification.id,
                 )
 
@@ -302,13 +457,27 @@ def main() -> None:
                     error=exc,
                 )
 
+        except Exception:
+
+            db.rollback()
+
+            logger.exception(
+                "Unexpected error while processing "
+                "email notification"
+            )
+
         finally:
+
             db.close()
 
             logger.info(
                 "Database session closed"
             )
 
+
+# --------------------------------------------------
+# Entry point
+# --------------------------------------------------
 
 if __name__ == "__main__":
     main()
