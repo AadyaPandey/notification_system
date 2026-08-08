@@ -2,13 +2,17 @@ import json
 import os
 import random
 import time
-
+import smtplib
 from kafka import KafkaConsumer
 
 from database import SessionLocal
 from models import Notification, NotificationStatus
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from kafka_producer import publish_event
 
+EMAIL = os.getenv("EMAIL_ADDRESS")
+APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
 
 MAX_RETRY_COUNT = 3
 
@@ -20,14 +24,31 @@ def get_backoff_seconds(retry_count: int) -> int:
 
 def send_email(notification):
 
-    print(f"Retrying Email to {notification.recipient}")
+    if not EMAIL:
+        raise ValueError("EMAIL_ADDRESS not set")
+    
+    if not APP_PASSWORD:
+        raise ValueError("EMAIL_APP_PASSWORD not set")
+    
+    
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = notification.subject
+    msg["From"] = EMAIL
+    msg["To"] = notification.recipient
+    
+    with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
+        smtp.ehlo()
+        smtp.starttls()
+        smtp.ehlo()
 
-    time.sleep(2)
-
-    if random.choice([True, False]):
-        raise Exception("Email service unavailable")
-
-    print("Email Sent")
+        smtp.login(EMAIL, APP_PASSWORD)
+    
+        smtp.sendmail(
+            EMAIL,
+            notification.recipient,
+            msg.as_string(),
+        )
+    
 
 
 def send_sms(notification):
@@ -41,17 +62,6 @@ def send_sms(notification):
 
     print("SMS Sent")
 
-
-def send_push(notification):
-
-    print(f"Retrying Push Notification to {notification.recipient}")
-
-    time.sleep(2)
-
-    if random.choice([True, False]):
-        raise Exception("Push service unavailable")
-
-    print("Push Sent")
 
 
 def main() -> None:
@@ -95,8 +105,6 @@ def main() -> None:
                     send_email(notification)
                 elif channel == "SMS":
                     send_sms(notification)
-                elif channel == "PUSH":
-                    send_push(notification)
                 else:
                     raise Exception("Invalid Channel")
 
@@ -110,7 +118,7 @@ def main() -> None:
 
                 retry_count += 1
 
-                if retry_count < MAX_RETRY_COUNT:
+                if retry_count <= MAX_RETRY_COUNT:
                     backoff_seconds = get_backoff_seconds(retry_count)
                     print(
                         f"Backing off for {backoff_seconds}s before retry {retry_count}"

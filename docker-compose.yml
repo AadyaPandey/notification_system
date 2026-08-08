@@ -154,10 +154,10 @@ services:
       - .env
     restart: unless-stopped
 
-  retry-consumer:
+    retry-scheduler:
     build: ./notification_service
-    container_name: retry-consumer
-    command: python -m notification_consumer.retry_consumer
+    container_name: retry-scheduler
+    command: python retry_scheduler.py
     depends_on:
       postgres:
         condition: service_healthy

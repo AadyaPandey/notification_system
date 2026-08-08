@@ -2,14 +2,15 @@ import json
 import logging
 import os
 import smtplib
+from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from kafka import KafkaConsumer
 
 from database import SessionLocal
-from kafka_producer import publish_event
 from models import Notification, NotificationStatus
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 EMAIL = os.getenv("EMAIL_ADDRESS")
 APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
+
+MAX_RETRIES = 3
+INITIAL_RETRY_DELAY = 5
 
 
 def send_email(notification):
@@ -44,11 +48,15 @@ def send_email(notification):
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>GrantGuard Notification</title>
+  <title>FundWise Notification</title>
 </head>
-<body style="margin:0;padding:0;background-color:#f4f7fb;font-family:Arial,Helvetica,sans-serif;">
 
-  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 0;">
+<body style="margin:0;padding:0;background-color:#f4f7fb;
+             font-family:Arial,Helvetica,sans-serif;">
+
+  <table width="100%" cellpadding="0" cellspacing="0"
+         style="padding:40px 0;">
+
     <tr>
       <td align="center">
 
@@ -60,19 +68,25 @@ def send_email(notification):
           <tr>
             <td align="center"
                 style="background:#2563eb;padding:24px;color:white;">
+
               <h1 style="margin:0;font-size:28px;">
-                GrantGuard
+                FundWise
               </h1>
+
               <p style="margin-top:8px;font-size:15px;">
                 Grant Application Review
               </p>
+
             </td>
           </tr>
 
           <!-- Body -->
           <tr>
-            <td style="padding:35px;color:#333;line-height:1.7;font-size:16px;">
+            <td style="padding:35px;color:#333;
+                       line-height:1.7;font-size:16px;">
+
               {notification.message.replace(chr(10), "<br>")}
+
             </td>
           </tr>
 
@@ -87,9 +101,12 @@ def send_email(notification):
           <tr>
             <td align="center"
                 style="padding:20px;color:#6b7280;font-size:13px;">
+
               This email was generated automatically by
-              <strong>GrantGuard</strong>.<br>
+              <strong>FundWise</strong>.<br>
+
               Please do not reply to this email.
+
             </td>
           </tr>
 
@@ -97,6 +114,7 @@ def send_email(notification):
 
       </td>
     </tr>
+
   </table>
 
 </body>
@@ -124,6 +142,53 @@ def send_email(notification):
     )
 
 
+def schedule_retry(db, notification, error):
+    """
+    Schedule the next retry using exponential backoff.
+
+    Retry 1 -> 5 seconds
+    Retry 2 -> 10 seconds
+    Retry 3 -> 20 seconds
+    """
+
+    notification.retry_count += 1
+    notification.last_error = str(error)
+
+    if notification.retry_count <= MAX_RETRIES:
+
+        delay_seconds = INITIAL_RETRY_DELAY * (
+            2 ** (notification.retry_count - 1)
+        )
+
+        notification.status = NotificationStatus.RETRY_PENDING
+
+        notification.next_retry_at = (
+            datetime.now(timezone.utc)
+            + timedelta(seconds=delay_seconds)
+        )
+
+        db.commit()
+
+        logger.info(
+            "Notification %s scheduled for retry %d in %d seconds",
+            notification.id,
+            notification.retry_count,
+            delay_seconds,
+        )
+
+    else:
+        notification.status = NotificationStatus.FAILED
+        notification.next_retry_at = None
+
+        db.commit()
+
+        logger.error(
+            "Notification %s permanently failed after %d retries",
+            notification.id,
+            MAX_RETRIES,
+        )
+
+
 def main() -> None:
     logger.info("Starting Email Consumer...")
 
@@ -132,12 +197,15 @@ def main() -> None:
         bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS"),
         group_id="email-group",
         auto_offset_reset="latest",
-        value_deserializer=lambda m: json.loads(m.decode("utf-8")),
+        value_deserializer=lambda m: json.loads(
+            m.decode("utf-8")
+        ),
     )
 
     logger.info("Waiting for Kafka messages...")
 
     for message in consumer:
+
         logger.info(
             "Received Kafka message | partition=%s offset=%s",
             message.partition,
@@ -145,19 +213,22 @@ def main() -> None:
         )
 
         event = message.value
-        logger.info("Event: %s", event)
+
+        logger.info(
+            "Event: %s",
+            event,
+        )
 
         notification_id = event["notification_id"]
-        retry_count = event["retry_count"]
-        user_id = event["user_id"]
-        channel = event.get("channel", "EMAIL")
 
         db = SessionLocal()
 
         try:
             notification = (
                 db.query(Notification)
-                .filter(Notification.id == notification_id)
+                .filter(
+                    Notification.id == notification_id
+                )
                 .first()
             )
 
@@ -168,9 +239,21 @@ def main() -> None:
                 )
                 continue
 
+            # Prevent duplicate email delivery
             if notification.status == NotificationStatus.SENT:
                 logger.info(
-                    "Notification %s already sent. Skipping duplicate delivery.",
+                    "Notification %s already sent. "
+                    "Skipping duplicate delivery.",
+                    notification.id,
+                )
+                continue
+
+            # If the notification has already permanently failed,
+            # don't process it again.
+            if notification.status == NotificationStatus.FAILED:
+                logger.info(
+                    "Notification %s already marked FAILED. "
+                    "Skipping.",
                     notification.id,
                 )
                 continue
@@ -179,6 +262,11 @@ def main() -> None:
                 send_email(notification)
 
                 notification.status = NotificationStatus.SENT
+
+                notification.next_retry_at = None
+
+                notification.last_error = None
+
                 db.commit()
 
                 logger.info(
@@ -186,31 +274,25 @@ def main() -> None:
                     notification.id,
                 )
 
-            except Exception:
+            except Exception as exc:
+
                 logger.exception(
                     "Failed to send email for notification %s",
                     notification.id,
                 )
 
-                retry_count += 1
-
-                publish_event(
-                    topic="notifications.retry",
-                    user_id=user_id,
-                    notification_id=notification.id,
-                    channel=channel,
-                    retry_count=retry_count,
-                )
-
-                logger.info(
-                    "Published retry event for notification %s (retry_count=%d)",
-                    notification.id,
-                    retry_count,
+                schedule_retry(
+                    db=db,
+                    notification=notification,
+                    error=exc,
                 )
 
         finally:
             db.close()
-            logger.info("Database session closed")
+
+            logger.info(
+                "Database session closed"
+            )
 
 
 if __name__ == "__main__":
