@@ -1,14 +1,14 @@
 import json
+import logging
 import os
 import time
-import logging
+from datetime import datetime, timedelta, timezone
 
 from prometheus_client import Counter, start_http_server
 from kafka import KafkaConsumer
 
 from database import SessionLocal
 from models import Notification, NotificationStatus
-from kafka_producer import publish_event
 
 
 # --------------------------------------------------
@@ -21,6 +21,14 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("sms-consumer")
+
+
+# --------------------------------------------------
+# Retry configuration
+# --------------------------------------------------
+
+MAX_RETRIES = 3
+INITIAL_RETRY_DELAY = 5
 
 
 # --------------------------------------------------
@@ -58,7 +66,6 @@ def send_sms(notification):
 
     time.sleep(2)
 
-    # Simulate Twilio-style SMS provider
     logger.info("SMS Provider: Twilio")
     logger.info("Connecting to SMS provider...")
     logger.info("Preparing SMS request...")
@@ -85,6 +92,71 @@ def send_sms(notification):
 
 
 # --------------------------------------------------
+# Retry scheduling
+# --------------------------------------------------
+
+def schedule_retry(db, notification, error):
+    """
+    Schedule the next retry using exponential backoff.
+
+    Retry 1 -> 5 seconds
+    Retry 2 -> 10 seconds
+    Retry 3 -> 20 seconds
+    After that -> FAILED / DLQ
+    """
+
+    notification.retry_count += 1
+    notification.last_error = str(error)
+
+    # --------------------------------------------------
+    # Schedule another retry
+    # --------------------------------------------------
+
+    if notification.retry_count <= MAX_RETRIES:
+
+        delay_seconds = INITIAL_RETRY_DELAY * (
+            2 ** (notification.retry_count - 1)
+        )
+
+        notification.status = NotificationStatus.RETRY_PENDING
+
+        notification.next_retry_at = (
+            datetime.now(timezone.utc)
+            + timedelta(seconds=delay_seconds)
+        )
+
+        db.commit()
+
+        logger.warning(
+            "SMS notification %s scheduled for retry | "
+            "retry_count=%d/%d | delay=%ds | next_retry_at=%s",
+            notification.id,
+            notification.retry_count,
+            MAX_RETRIES,
+            delay_seconds,
+            notification.next_retry_at,
+        )
+
+    # --------------------------------------------------
+    # Maximum retries reached
+    # --------------------------------------------------
+
+    else:
+
+        notification.status = NotificationStatus.FAILED
+        notification.next_retry_at = None
+
+        db.commit()
+
+        logger.error(
+            "SMS notification %s permanently failed "
+            "after %d retries",
+            notification.id,
+            MAX_RETRIES,
+        )
+
+
+# --------------------------------------------------
 # Main consumer
 # --------------------------------------------------
 
@@ -92,12 +164,19 @@ def main() -> None:
 
     logger.info("Starting SMS consumer...")
 
+    # --------------------------------------------------
     # Start Prometheus metrics server
+    # --------------------------------------------------
+
     start_http_server(9100)
 
     logger.info(
         "Prometheus metrics server started on port 9100"
     )
+
+    # --------------------------------------------------
+    # Kafka consumer
+    # --------------------------------------------------
 
     consumer = KafkaConsumer(
         "notifications.sms",
@@ -115,19 +194,20 @@ def main() -> None:
         "Connected to Kafka topic=notifications.sms"
     )
 
+    # --------------------------------------------------
+    # Consume messages
+    # --------------------------------------------------
+
     for message in consumer:
 
         event = message.value
 
         logger.info(
             "Received SMS event: %s",
-            event
+            event,
         )
 
         notification_id = event["notification_id"]
-        retry_count = event["retry_count"]
-        user_id = event["user_id"]
-        channel = event.get("channel", "SMS")
 
         db = SessionLocal()
 
@@ -141,82 +221,123 @@ def main() -> None:
                 .first()
             )
 
+            # --------------------------------------------------
+            # Notification doesn't exist
+            # --------------------------------------------------
+
             if notification is None:
 
                 logger.error(
-                    "Notification not found: notification_id=%s",
+                    "Notification not found | "
+                    "notification_id=%s",
                     notification_id,
                 )
 
                 continue
 
             logger.info(
-                "Processing notification_id=%s | retry_count=%s",
+                "Processing notification | "
+                "notification_id=%s | "
+                "retry_count=%s",
                 notification.id,
-                retry_count,
+                notification.retry_count,
             )
+
+            # --------------------------------------------------
+            # Prevent duplicate delivery
+            # --------------------------------------------------
+
+            if notification.status == NotificationStatus.SENT:
+
+                logger.info(
+                    "Notification %s already SENT. "
+                    "Skipping duplicate delivery.",
+                    notification.id,
+                )
+
+                continue
+
+            # --------------------------------------------------
+            # Already permanently failed
+            # --------------------------------------------------
+
+            if notification.status == NotificationStatus.FAILED:
+
+                logger.info(
+                    "Notification %s already FAILED. "
+                    "Skipping.",
+                    notification.id,
+                )
+
+                continue
+
+            # --------------------------------------------------
+            # Attempt SMS delivery
+            # --------------------------------------------------
 
             try:
 
                 send_sms(notification)
 
-                notification.status = (
-                    NotificationStatus.SENT
-                )
+                # --------------------------------------------------
+                # SUCCESS
+                # --------------------------------------------------
+
+                notification.status = NotificationStatus.SENT
+                notification.next_retry_at = None
+                notification.last_error = None
 
                 db.commit()
 
-                # Increment successful SMS counter
                 sms_processed.inc()
 
                 logger.info(
-                    "Notification %s marked SENT",
+                    "SMS notification %s marked SENT",
                     notification.id,
                 )
 
-            except Exception:
+            except Exception as exc:
 
-                # Increment failed SMS counter
+                # --------------------------------------------------
+                # FAILURE
+                # --------------------------------------------------
+
                 sms_failed.inc()
 
-                # logger.exception() automatically includes
-                # the exception + full traceback
                 logger.exception(
-                    "SMS delivery failed for notification_id=%s",
+                    "SMS delivery failed | "
+                    "notification_id=%s",
                     notification.id,
                 )
 
-                retry_count += 1
-
-                logger.warning(
-                    "Publishing retry event | "
-                    "notification_id=%s | retry_count=%s",
-                    notification.id,
-                    retry_count,
+                # Schedule retry in database
+                schedule_retry(
+                    db=db,
+                    notification=notification,
+                    error=exc,
                 )
 
-                publish_event(
-                    topic="notifications.retry",
-                    user_id=user_id,
-                    notification_id=notification.id,
-                    channel=channel,
-                    retry_count=retry_count,
-                )
+        except Exception:
 
-                logger.info(
-                    "Retry event published | "
-                    "notification_id=%s | retry_count=%s",
-                    notification.id,
-                    retry_count,
-                )
+            db.rollback()
+
+            logger.exception(
+                "Unexpected error while processing "
+                "SMS notification"
+            )
 
         finally:
+
             db.close()
 
             logger.debug(
                 "Database session closed"
             )
 
+
+# --------------------------------------------------
+# Entry point
+# --------------------------------------------------
 
 if __name__ == "__main__":
     main()

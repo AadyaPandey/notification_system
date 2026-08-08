@@ -289,7 +289,7 @@ def main() -> None:
                     notification.id,
                 )
 
-            except Exception:
+            except Exception as exc:
                 emails_failed.inc()
                 logger.exception(
                     "Failed to send email for notification %s",
