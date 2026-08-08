@@ -3,6 +3,7 @@ import logging
 import os
 
 from dotenv import load_dotenv
+from prometheus_client import Counter, start_http_server
 from kafka import KafkaConsumer
 
 from database import SessionLocal
@@ -14,6 +15,23 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+# --------------------------------------------------
+# Prometheus metrics
+# --------------------------------------------------
+
+user_events_processed = Counter(
+    "user_events_processed_total",
+    "Total number of user events successfully processed",
+    ["event_type"],
+)
+
+user_events_failed = Counter(
+    "user_events_failed_total",
+    "Total number of user events that failed",
+    ["event_type"],
+)
+
+
 consumer = KafkaConsumer(
     "user-events",
     bootstrap_servers=os.getenv(
@@ -23,7 +41,9 @@ consumer = KafkaConsumer(
     group_id="user-consumer-group",
     auto_offset_reset="earliest",
     enable_auto_commit=True,
-    value_deserializer=lambda m: json.loads(m.decode("utf-8")),
+    value_deserializer=lambda m: json.loads(
+        m.decode("utf-8")
+    ),
 )
 
 
@@ -32,7 +52,9 @@ def handle_user_registered(db, event):
 
     existing_user = (
         db.query(NotificationUser)
-        .filter(NotificationUser.user_id == event["user_id"])
+        .filter(
+            NotificationUser.user_id == event["user_id"]
+        )
         .first()
     )
 
@@ -47,7 +69,9 @@ def handle_user_registered(db, event):
         user_id=event["user_id"],
         email=event["email"],
         phone_number=event["phone_number"],
-        notification_preference=event["notification_preference"],
+        notification_preference=event[
+            "notification_preference"
+        ],
     )
 
     db.add(user)
@@ -64,7 +88,9 @@ def handle_user_updated(db, event):
 
     user = (
         db.query(NotificationUser)
-        .filter(NotificationUser.user_id == event["user_id"])
+        .filter(
+            NotificationUser.user_id == event["user_id"]
+        )
         .first()
     )
 
@@ -92,6 +118,13 @@ def handle_user_updated(db, event):
 def main():
     logger.info("User Consumer Started...")
 
+    # Start Prometheus metrics server
+    start_http_server(9100)
+
+    logger.info(
+        "Prometheus metrics server started on port 9100"
+    )
+
     for message in consumer:
 
         event = message.value
@@ -103,27 +136,53 @@ def main():
 
         db = SessionLocal()
 
+        event_type = event.get("event", "UNKNOWN")
+
         try:
 
-            event_type = event.get("event")
-
             if event_type == "USER_REGISTERED":
-                handle_user_registered(db, event)
+
+                handle_user_registered(
+                    db,
+                    event,
+                )
+
+                user_events_processed.labels(
+                    event_type="USER_REGISTERED"
+                ).inc()
 
             elif event_type == "USER_UPDATED":
-                handle_user_updated(db, event)
+
+                handle_user_updated(
+                    db,
+                    event,
+                )
+
+                user_events_processed.labels(
+                    event_type="USER_UPDATED"
+                ).inc()
 
             else:
+
                 logger.warning(
                     "Unknown event %s",
                     event_type,
                 )
 
         except Exception:
+
             db.rollback()
-            logger.exception("Consumer Error")
+
+            user_events_failed.labels(
+                event_type=event_type
+            ).inc()
+
+            logger.exception(
+                "Consumer Error"
+            )
 
         finally:
+
             db.close()
 
 

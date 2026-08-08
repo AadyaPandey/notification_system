@@ -1,0 +1,46 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["prometheus:9090"]
+
+  # FastAPI services
+  - job_name: "api-gateway"
+    static_configs:
+      - targets: ["api-gateway:8000"]
+
+  - job_name: "user-service"
+    static_configs:
+      - targets: ["user-service:8000"]
+
+  - job_name: "notification-service"
+    static_configs:
+      - targets: ["notification-service:8000"]
+
+  # Kafka consumers
+  - job_name: "email-consumer"
+    static_configs:
+      - targets: ["email-consumer:9100"]
+
+  - job_name: "sms-consumer"
+    static_configs:
+      - targets: ["sms-consumer:9100"]
+
+  - job_name: "push-consumer"
+    static_configs:
+      - targets: ["push-consumer:9100"]
+
+  - job_name: "retry-consumer"
+    static_configs:
+      - targets: ["retry-consumer:9100"]
+
+  - job_name: "user-consumer"
+    static_configs:
+      - targets: ["user-consumer:9100"]
+
+  - job_name: "dlq-consumer"
+    static_configs:
+      - targets: ["dlq-consumer:9100"]

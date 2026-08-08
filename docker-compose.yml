@@ -214,6 +214,25 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+  
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - api-gateway
+      - user-service
+      - notification-service
+      - email-consumer
+      - sms-consumer
+      - push-consumer
+      - retry-consumer
+      - user-consumer
+      - dlq-consumer
+    restart: unless-stopped
 
 volumes:
   postgres_data:

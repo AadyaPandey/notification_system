@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import smtplib
+from prometheus_client import Counter, start_http_server
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -10,6 +11,7 @@ from kafka import KafkaConsumer
 from database import SessionLocal
 from kafka_producer import publish_event
 from models import Notification, NotificationStatus
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,6 +22,16 @@ logger = logging.getLogger(__name__)
 
 EMAIL = os.getenv("EMAIL_ADDRESS")
 APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
+
+emails_processed = Counter(
+    "email_notifications_processed_total",
+    "Total number of email notifications successfully processed",
+)
+
+emails_failed = Counter(
+    "email_notifications_failed_total",
+    "Total number of email notifications that failed",
+)
 
 
 def send_email(notification):
@@ -44,7 +56,7 @@ def send_email(notification):
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>GrantGuard Notification</title>
+  <title>FundWise Notification</title>
 </head>
 <body style="margin:0;padding:0;background-color:#f4f7fb;font-family:Arial,Helvetica,sans-serif;">
 
@@ -61,7 +73,7 @@ def send_email(notification):
             <td align="center"
                 style="background:#2563eb;padding:24px;color:white;">
               <h1 style="margin:0;font-size:28px;">
-                GrantGuard
+                FundWise
               </h1>
               <p style="margin-top:8px;font-size:15px;">
                 Grant Application Review
@@ -88,7 +100,7 @@ def send_email(notification):
             <td align="center"
                 style="padding:20px;color:#6b7280;font-size:13px;">
               This email was generated automatically by
-              <strong>GrantGuard</strong>.<br>
+              <strong>FundWise</strong>.<br>
               Please do not reply to this email.
             </td>
           </tr>
@@ -126,6 +138,8 @@ def send_email(notification):
 
 def main() -> None:
     logger.info("Starting Email Consumer...")
+    start_http_server(9100)
+    logger.info("Prometheus metrics server started on port 9100")
 
     consumer = KafkaConsumer(
         "notifications.email",
@@ -181,12 +195,15 @@ def main() -> None:
                 notification.status = NotificationStatus.SENT
                 db.commit()
 
+                emails_processed.inc()
+
                 logger.info(
                     "Notification %s marked as SENT",
                     notification.id,
                 )
 
             except Exception:
+                emails_failed.inc()
                 logger.exception(
                     "Failed to send email for notification %s",
                     notification.id,

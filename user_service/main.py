@@ -7,6 +7,7 @@ from database import Base, engine
 import models
 from routers import users
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 
 
 
@@ -31,6 +32,7 @@ app = FastAPI(
     title="User Service",
     lifespan=lifespan
 )
+Instrumentator().instrument(app).expose(app)
 
 app.add_middleware(
     CORSMiddleware,
