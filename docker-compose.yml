@@ -248,6 +248,14 @@ services:
       - user-consumer
       - dlq-consumer
     restart: unless-stopped
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
 
 volumes:
   postgres_data:
+  grafana_data:
