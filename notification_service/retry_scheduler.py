@@ -62,11 +62,16 @@ def process_due_notifications():
                     notification.id,
                     notification.retry_count,
                 )
-
+                topic_map = {
+                    "EMAIL": "notifications.email",
+                    "SMS": "notifications.sms",
+                    "PUSH": "notifications.push",
+                }
                 # Send the notification back to the
                 # MAIN email topic.
+                topic = topic_map[notification.channel]
                 publish_event(
-                    topic="notifications.retry",
+                    topic=topic,
                     user_id=notification.user_id,
                     notification_id=notification.id,
                     channel=notification.channel,
