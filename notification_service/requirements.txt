@@ -7,3 +7,5 @@ kafka-python
 httpx
 pydantic
 requests
+prometheus-fastapi-instrumentator
+prometheus-client

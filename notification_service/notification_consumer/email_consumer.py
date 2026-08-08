@@ -3,6 +3,7 @@ import logging
 import os
 import smtplib
 from datetime import datetime, timedelta, timezone
+from prometheus_client import Counter, start_http_server
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -24,6 +25,16 @@ APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
 
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 5
+
+emails_processed = Counter(
+    "email_notifications_processed_total",
+    "Total number of email notifications successfully processed",
+)
+
+emails_failed = Counter(
+    "email_notifications_failed_total",
+    "Total number of email notifications that failed",
+)
 
 
 def send_email(notification):
@@ -191,6 +202,8 @@ def schedule_retry(db, notification, error):
 
 def main() -> None:
     logger.info("Starting Email Consumer...")
+    start_http_server(9100)
+    logger.info("Prometheus metrics server started on port 9100")
 
     consumer = KafkaConsumer(
         "notifications.email",
@@ -269,13 +282,15 @@ def main() -> None:
 
                 db.commit()
 
+                emails_processed.inc()
+
                 logger.info(
                     "Notification %s marked as SENT",
                     notification.id,
                 )
 
             except Exception as exc:
-
+                emails_failed.inc()
                 logger.exception(
                     "Failed to send email for notification %s",
                     notification.id,

@@ -154,7 +154,7 @@ services:
       - .env
     restart: unless-stopped
 
-    retry-scheduler:
+  retry-scheduler:
     build: ./notification_service
     container_name: retry-scheduler
     command: python retry_scheduler.py
@@ -168,6 +168,21 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+
+  # retry-consumer:
+  #   build: ./notification_service
+  #   container_name: retry-consumer
+  #   command: python -m notification_consumer.retry_consumer
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     kafka:
+  #       condition: service_healthy
+  #     create-topics:
+  #       condition: service_completed_successfully
+  #   env_file:
+  #     - .env
+  #   restart: unless-stopped
 
   user-consumer:
     build: ./notification_service
@@ -213,6 +228,25 @@ services:
         condition: service_healthy
     env_file:
       - .env
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - api-gateway
+      - user-service
+      - notification-service
+      - email-consumer
+      - sms-consumer
+
+
+      - user-consumer
+      - dlq-consumer
     restart: unless-stopped
 
 volumes:

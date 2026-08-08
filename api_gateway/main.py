@@ -4,9 +4,11 @@ from middleware import JWTMiddleware
 from routes.public import router as public_router
 from routes.private import router as private_router
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 
 
 app = FastAPI(title="API Gateway")
+Instrumentator().instrument(app).expose(app)
 
 app.add_middleware(JWTMiddleware)
 

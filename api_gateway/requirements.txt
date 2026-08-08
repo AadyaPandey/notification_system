@@ -4,3 +4,5 @@ httpx
 redis
 PyJWT
 python-dotenv
+prometheus-fastapi-instrumentator
+prometheus-client

@@ -66,10 +66,10 @@ def process_due_notifications():
                 # Send the notification back to the
                 # MAIN email topic.
                 publish_event(
-                    topic="notifications.email",
+                    topic="notifications.retry",
                     user_id=notification.user_id,
                     notification_id=notification.id,
-                    channel="EMAIL",
+                    channel=notification.channel,
                     retry_count=notification.retry_count,
                 )
 

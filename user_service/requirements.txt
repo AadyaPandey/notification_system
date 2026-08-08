@@ -8,3 +8,5 @@ PyJWT
 pydantic
 email-validator
 kafka-python
+prometheus-fastapi-instrumentator
+prometheus-client
