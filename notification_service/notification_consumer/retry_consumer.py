@@ -3,14 +3,18 @@ import logging
 import os
 import random
 import time
-
+import smtplib
 from prometheus_client import Counter, start_http_server
 from kafka import KafkaConsumer
 
 from database import SessionLocal
 from models import Notification, NotificationStatus
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from kafka_producer import publish_event
 
+EMAIL = os.getenv("EMAIL_ADDRESS")
+APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
 
 # --------------------------------------------------
 # Logging configuration
@@ -68,20 +72,32 @@ def get_backoff_seconds(retry_count: int) -> int:
 # --------------------------------------------------
 
 def send_email(notification):
-    logger.info(
-        "Retrying Email | recipient=%s",
-        notification.recipient,
-    )
 
-    time.sleep(2)
+    if not EMAIL:
+        raise ValueError("EMAIL_ADDRESS not set")
+    
+    if not APP_PASSWORD:
+        raise ValueError("EMAIL_APP_PASSWORD not set")
+    
+    
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = notification.subject
+    msg["From"] = EMAIL
+    msg["To"] = notification.recipient
+    
+    with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
+        smtp.ehlo()
+        smtp.starttls()
+        smtp.ehlo()
 
-    if random.choice([True, False]):
-        raise Exception("Email service unavailable")
-
-    logger.info(
-        "Email Sent | recipient=%s",
-        notification.recipient,
-    )
+        smtp.login(EMAIL, APP_PASSWORD)
+    
+        smtp.sendmail(
+            EMAIL,
+            notification.recipient,
+            msg.as_string(),
+        )
+    
 
 
 def send_sms(notification):
@@ -101,26 +117,6 @@ def send_sms(notification):
     )
 
 
-def send_push(notification):
-    logger.info(
-        "Retrying Push Notification | recipient=%s",
-        notification.recipient,
-    )
-
-    time.sleep(2)
-
-    if random.choice([True, False]):
-        raise Exception("Push service unavailable")
-
-    logger.info(
-        "Push Sent | recipient=%s",
-        notification.recipient,
-    )
-
-
-# --------------------------------------------------
-# Main consumer
-# --------------------------------------------------
 
 def main() -> None:
 
@@ -220,10 +216,6 @@ def main() -> None:
 
                 elif channel == "SMS":
                     send_sms(notification)
-
-                elif channel == "PUSH":
-                    send_push(notification)
-
                 else:
                     raise Exception(
                         f"Invalid channel: {channel}"
@@ -272,23 +264,11 @@ def main() -> None:
                 # Retry
                 # --------------------------------------------------
 
-                if retry_count < MAX_RETRY_COUNT:
-
-                    backoff_seconds = get_backoff_seconds(
-                        retry_count
+                if retry_count <= MAX_RETRY_COUNT:
+                    backoff_seconds = get_backoff_seconds(retry_count)
+                    print(
+                        f"Backing off for {backoff_seconds}s before retry {retry_count}"
                     )
-
-                    logger.warning(
-                        "Retry scheduled | "
-                        "notification_id=%s | "
-                        "retry_count=%s/%s | "
-                        "backoff=%ss",
-                        notification.id,
-                        retry_count,
-                        MAX_RETRY_COUNT,
-                        backoff_seconds,
-                    )
-
                     time.sleep(backoff_seconds)
 
                     publish_event(

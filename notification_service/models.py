@@ -1,7 +1,7 @@
 import enum
 import uuid
 
-from sqlalchemy import Column, DateTime, Enum, ForeignKey, String, Text
+from sqlalchemy import Column, DateTime, Enum, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 
@@ -17,6 +17,7 @@ class NotificationChannel(str, enum.Enum):
 class NotificationStatus(str, enum.Enum):
     PENDING = "PENDING"
     SENT = "SENT"
+    RETRY_PENDING = "RETRY_PENDING"
     FAILED = "FAILED"
 
 
@@ -69,6 +70,21 @@ class Notification(Base):
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now()
+    )
+    retry_count = Column(
+        Integer,
+        default=0,
+        nullable=False
+    )
+
+    next_retry_at = Column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    last_error = Column(
+        Text,
+        nullable=True
     )
 
 class NotificationUser(Base):
