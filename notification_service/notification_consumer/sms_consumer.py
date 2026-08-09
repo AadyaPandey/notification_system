@@ -51,6 +51,11 @@ sms_dlq = Counter(
     "Total number of SMS notifications moved to DLQ",
 )
 
+sms_retries_scheduled = Counter(
+    "sms_notification_retries_scheduled_total",
+    "Total number of SMS retries scheduled",
+)
+
 
 # ============================================================
 # Simulated SMS provider
@@ -137,6 +142,8 @@ def schedule_retry(db, notification, error):
         )
 
         db.commit()
+
+        sms_retries_scheduled.inc()
 
         logger.warning(
             "SMS retry scheduled | "

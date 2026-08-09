@@ -29,13 +29,9 @@ scrape_configs:
     static_configs:
       - targets: ["sms-consumer:9100"]
 
-  - job_name: "push-consumer"
+  - job_name: "retry-scheduler"
     static_configs:
-      - targets: ["push-consumer:9100"]
-
-  - job_name: "retry-consumer"
-    static_configs:
-      - targets: ["retry-consumer:9100"]
+      - targets: ["retry-scheduler:9100"]
 
   - job_name: "user-consumer"
     static_configs:

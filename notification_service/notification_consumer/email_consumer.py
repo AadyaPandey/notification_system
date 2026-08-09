@@ -62,6 +62,11 @@ emails_dlq = Counter(
     "Total number of email notifications moved to DLQ",
 )
 
+emails_retries_scheduled = Counter(
+    "email_notification_retries_scheduled_total",
+    "Total number of email retries scheduled",
+)
+
 
 # --------------------------------------------------
 # Send email
@@ -213,6 +218,8 @@ def schedule_retry(db, notification, error):
         )
 
         db.commit()
+
+        emails_retries_scheduled.inc()
 
         logger.info(
             "Notification %s scheduled for retry "

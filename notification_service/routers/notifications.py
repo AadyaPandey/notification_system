@@ -6,6 +6,21 @@ from models import Notification, NotificationChannel as DBChannel, NotificationU
 from schemas import NotificationCreate, NotificationResponse
 from kafka_producer import publish_event
 
+from prometheus_client import Counter
+
+
+notifications_created = Counter(
+    "notifications_created_total",
+    "Total number of notification delivery records created",
+    ["channel"],
+)
+
+notifications_publish_failed = Counter(
+    "notifications_publish_failed_total",
+    "Total number of notification Kafka publish failures",
+    ["channel"],
+)
+
 router = APIRouter(
     prefix="/notifications",
     tags=["Notifications"]
@@ -72,13 +87,25 @@ def create_notification(
         db.commit()
         db.refresh(new_notification)
 
-        publish_event(
-            topic=topic_map[channel_value],
-            user_id=user_id,
-            notification_id=new_notification.id,
-            channel=channel_value,
-            retry_count=0
-        )
+        try:
+            publish_event(
+                topic=topic_map[channel_value],
+                user_id=user_id,
+                notification_id=new_notification.id,
+                channel=channel_value,
+                retry_count=0
+            )
+
+            notifications_created.labels(
+                channel=channel_value
+            ).inc()
+
+        except Exception:
+            notifications_publish_failed.labels(
+                channel=channel_value
+            ).inc()
+
+            raise
 
         if created_notification is None:
             created_notification = new_notification

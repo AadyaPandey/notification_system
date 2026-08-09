@@ -2,9 +2,16 @@ import logging
 import time
 from datetime import datetime, timezone
 
+from prometheus_client import Counter, Gauge, start_http_server
+from sqlalchemy import func
+
 from database import SessionLocal
 from kafka_producer import publish_event
-from models import Notification, NotificationStatus
+from models import (
+    Notification,
+    NotificationChannel,
+    NotificationStatus,
+)
 
 
 # ============================================================
@@ -26,6 +33,30 @@ logger = logging.getLogger("retry-scheduler")
 POLL_INTERVAL_SECONDS = 1
 BATCH_SIZE = 100
 
+METRICS_PORT = 9100
+
+retry_events_published = Counter(
+    "notification_retry_events_published_total",
+    "Total number of retry events successfully published to Kafka",
+    ["channel"],
+)
+
+retry_publish_failures = Counter(
+    "notification_retry_publish_failures_total",
+    "Total number of retry event publish failures",
+    ["channel"],
+)
+
+notification_status_count = Gauge(
+    "notification_status_count",
+    "Current number of notifications by channel and status",
+    ["channel", "status"],
+)
+
+notification_retry_pending_count = Gauge(
+    "notification_retry_pending_count",
+    "Current number of notifications waiting for a retry",
+)
 
 # ============================================================
 # Topic mapping
@@ -37,6 +68,45 @@ TOPIC_MAP = {
     "PUSH": "notifications.push",
 }
 
+def refresh_status_metrics(db):
+    counts = (
+        db.query(
+            Notification.channel,
+            Notification.status,
+            func.count(Notification.id),
+        )
+        .group_by(
+            Notification.channel,
+            Notification.status,
+        )
+        .all()
+    )
+
+    observed = {
+        (channel.value, status.value): int(count)
+        for channel, status, count in counts
+    }
+
+    total_retry_pending = 0
+
+    for channel in NotificationChannel:
+        for status in NotificationStatus:
+            value = observed.get(
+                (channel.value, status.value),
+                0,
+            )
+
+            notification_status_count.labels(
+                channel=channel.value,
+                status=status.value,
+            ).set(value)
+
+            if status == NotificationStatus.RETRY_PENDING:
+                total_retry_pending += value
+
+    notification_retry_pending_count.set(
+        total_retry_pending
+    )
 
 # ============================================================
 # Process due retries
@@ -73,6 +143,8 @@ def process_due_notifications():
             .limit(BATCH_SIZE)
             .all()
         )
+
+        refresh_status_metrics(db)
 
         if not notifications:
             return
@@ -222,6 +294,13 @@ def main():
 
     logger.info(
         "Starting Retry Scheduler..."
+    )
+
+    start_http_server(METRICS_PORT)
+
+    logger.info(
+        "Prometheus metrics server started on port %s",
+        METRICS_PORT,
     )
 
     while True:
