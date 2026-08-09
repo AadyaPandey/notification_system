@@ -139,20 +139,6 @@ services:
       - .env
     restart: unless-stopped
 
-  push-consumer:
-    build: ./notification_service
-    container_name: push-consumer
-    command: python -m notification_consumer.push_consumer
-    depends_on:
-      postgres:
-        condition: service_healthy
-      kafka:
-        condition: service_healthy
-      create-topics:
-        condition: service_completed_successfully
-    env_file:
-      - .env
-    restart: unless-stopped
 
   retry-scheduler:
     build: ./notification_service
@@ -243,7 +229,7 @@ services:
       - notification-service
       - email-consumer
       - sms-consumer
-
+      - retry-scheduler
 
       - user-consumer
       - dlq-consumer
@@ -255,6 +241,11 @@ services:
       - "3000:3000"
     depends_on:
       - prometheus
+    volumes:
+    - grafana_data:/var/lib/grafana
+    - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    restart: unless-stopped
 
 volumes:
   postgres_data:
